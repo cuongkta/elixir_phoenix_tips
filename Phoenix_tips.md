@@ -174,22 +174,206 @@ mix phx.server         # Starts applications and their servers
 
 
 
-3. ##### Query: 
+##### 3. Query: 
+
+```
+def query(query \\ User, params, kind)
+def query(q, params, :user) when is_map(params) do
+    Ecto.Query.where(q, [u], similarity(u.name, ^params["name"]) or similarity(u.name, ^params["given_name"]))
+  end
+def query(q, term, :user) when is_bitstring(term) do
+    Ecto.Query.where(q, [u], similarity(u.name, ^term) or similarity(u.given_name, ^term))
+  end
+```
+
+​
+
+##### 4 . Role, permission using Canary: 
+
+Note: we have to use `halt` in view to handle authentication 
+
+##### 5. Custom validation in Changeset: 
+
+```elixir
+ @doc false
+  def changeset(%Company{} = company, attrs) do
+    company
+    |> cast(attrs, [:name, :description, :avatar_path, :type, :number_phone, :email, :address])
+    |> validate_required([:name, :email, :number_phone])
+    |> validate_format(:email, ~r/@/)
+    |> validate_url_format(:avatar_path)
+    |> unique_constraint(:name, message: "Company is existing")
+    |> unique_constraint(:email, message: "Company's email is existing")
+  end
+
+
+
+@url "http"
+  defp validate_url_format(changeset, field) do
+    case changeset.valid? do
+      true ->
+        url = get_field(changeset, field)
+        if is_nil(url) do
+          changeset
+        else
+          case String.starts_with?(url, @url) or File.exists?(url) do
+            true -> changeset
+            _ -> add_error(changeset, :avatar_path, "It's not correct path of avatar")
+          end
+        end
+      _ ->
+        changeset
+    end
+  end
+```
+
+
+
+#### II.
+
+How to get value of key in a list. 
+
+```
+ params = [
+      keyword:      params["keyword"], 
+      district_id:  params["district_id"], 
+      ward_id:      params["ward_id"],
+      city_id:      params["city_id"],
+      developer:    params["developer"],
+      page:         params["page"]
+    ] 
+# Get
+search_term =  params[:keyword]
+```
+
+
+
+
+
+#### III. Note for mess: 
+
+How to work with relationship in database: https://medium.com/@Stephanbv/elixir-phoenix-a-todo-and-user-relationship-todo-application-part-4-7c2d80d22dea
+
+
+
+
+
+Nested associate: 
+
+1. Repo: https://hexdocs.pm/ecto/Ecto.Repo.html
+
+   ```elixir
+   # Use a single atom to preload an association
+   posts = Repo.preload posts, :comments
+
+   # Use a list of atoms to preload multiple associations
+   posts = Repo.preload posts, [:comments, :authors]
+
+   # Use a keyword list to preload nested associations as well
+   posts = Repo.preload posts, [comments: [:replies, :likes], authors: []]
+
+   # Use a keyword list to customize how associations are queried
+   posts = Repo.preload posts, [comments: from(c in Comment, order_by: c.published_at)]
+
+   # Use a two-element tuple for a custom query and nested association definition
+   query = from c in Comment, order_by: c.published_at
+   posts = Repo.preload posts, [comments: {query, [:replies, :likes]}]
+   ```
+
+   ​
+
+2. Ecto: https://robots.thoughtbot.com/preloading-nested-associations-with-ecto
 
    ```
-   def query(query \\ User, params, kind)
-   def query(q, params, :user) when is_map(params) do
-       Ecto.Query.where(q, [u], similarity(u.name, ^params["name"]) or similarity(u.name, ^params["given_name"]))
-     end
-   def query(q, term, :user) when is_bitstring(term) do
-       Ecto.Query.where(q, [u], similarity(u.name, ^term) or similarity(u.given_name, ^term))
-     end
+   user = Blog.User
+   |> where([user], user.id == ^user_id)
+   |> join(:left, [u], _ in assoc(u, :posts))
+   |> join(:left, [_, posts], _ in assoc(posts, :comments))
+   |> preload([_, p, c], [posts: {p, comments: c}])
+   |> Blog.Repo.one
    ```
 
    ​
 
 
 
-2. Role, permission using Canary: 
+Database with constraints: 
 
-   Note: we have to use `halt` in view to handle authentication 
+ Eg: create unique in migration and check in changset
+
+```python
+
+```
+
+
+
+3. Create new field and reference to other models: 
+
+   Eg:
+
+   ```elixir
+   schema "notifications" do
+       field :type, :integer
+       embeds_many :message, Message, on_replace: :delete
+       field :frequency, RealEstate.Type.Frequency, default:      :daily
+       field :sent, :boolean, default: false, null: false
+       field :anttention_id, :integer
+
+       embeds_many :data, Data, on_replace: :delete
+       belongs_to :receiver,     User
+       belongs_to :sender,       User
+       field :message_objects, :any, virtual: true
+       field :data_objects  , :any, virtual: true
+       timestamps()
+     end
+
+     @doc false
+     def changeset(%Notification{} = notification, attrs) do
+       notification
+       |> cast(attrs, [
+         :receiver_id, :sender_id, :frequency, :message_objects,
+         :data_objects, :anttention_id
+       ])
+       |> validate_required([])
+     end
+   end
+   ```
+
+   in migration: 
+
+   ```elixir
+   def change do
+       create table(:notifications) do
+         add :type, :integer
+         add :receiver_id, references(:users, on_delete: :delete_all)
+         add :sender_id, references(:users, on_delete: :delete_all)
+         add :sent, :boolean, default: false, null: false
+         add :message, :map
+         add :frequency, :string
+
+         timestamps()
+       end
+       create index(:notifications, [:receiver])
+       create index(:notifications, [:frequency, :sender])
+       create index(:notifications, [:frequency])
+
+     end
+   end
+
+   ```
+
+   ​
+
+4. Create and update with many to many relationship:
+
+5.  Compare and get exclude items between two list: 
+
+   ```elixir
+    # check and update condo
+         Enum.filter([1,2,4], &(&1 in [2, 4, 7, 9, 10]))   
+         # Result: [2,4]
+         Enum.filter([1,2,4], &(&1 not in [2, 4, 7, 9, 10]))
+         # Result: [9, 10]
+   ```
+
+   ​
